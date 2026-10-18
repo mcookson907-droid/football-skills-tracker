@@ -75,40 +75,54 @@ function dateFromNumber(n){return new Date(n*86400000).toISOString().slice(0,10)
 function shortDate(d){return new Date(d+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'})}
 function skillTimeline(s,today=day()){
  const days=Object.keys(s.days||{}).filter(d=>s.days[d]&&d<=today).sort();
- const start=days[0]||s.cycleStarted||s.createdOn||today,startDay=dateNumber(start),todayDay=dateNumber(today);
+ const start=[days[0],s.cycleStarted,s.createdOn,today].filter(d=>d&&d<=today).sort()[0],startDay=dateNumber(start),todayDay=dateNumber(today);
  const elapsed=Math.max(1,todayDay-startDay+1),blocks=Math.max(1,Math.ceil(elapsed/7)),span=blocks*7;
  const step=milestoneStep(s),daily=Math.max(1,Number(s.points)||200),target=Number(s.target)||10000;
  let score=0;const points=days.map(date=>{score+=typeof s.days[date]==='number'?s.days[date]:200;return {date,score}});
  let next=(Math.floor(score/step)+1)*step;if(target>score&&target<next)next=target;
  const max=next*1.18;
+ const calendar=[];let total=0;for(let i=0;i<span;i++){const date=dateFromNumber(startDay+i),future=date>today,amount=typeof s.days?.[date]==='number'?s.days[date]:(s.days?.[date]?200:0);if(!future)total+=amount;calendar.push({date,score:future?null:total,status:future?'Upcoming':amount?'Practised':date===today?'Not recorded yet':'Missed'})}
  const levels=[];const stride=Math.max(1,Math.ceil(next/step/6));
  for(let m=step*stride;m<=next;m+=step*stride)levels.push(m);
  for(let m of [Math.floor(score/step)*step,next,target])if(m>0&&m<=next&&!levels.includes(m))levels.push(m);
  levels.sort((a,b)=>a-b);
  const milestones=levels.map(value=>({value,passed:score>=value,date:points.find(p=>p.score>=value)?.date||null,isTarget:value===target,remaining:Math.max(0,Math.ceil((value-score)/daily))}));
- return {start,startDay,today,todayDay,days,points,score,blocks,span,step,daily,target,next,max,milestones};
+ return {start,startDay,today,todayDay,days,points,calendar,score,blocks,span,step,daily,target,next,max,milestones};
+}
+function milestoneIcon(value,isTarget,passed,x,y,title){
+ const fill=passed?'#e9b73f':'#fff',stroke=passed?'#946413':'#b58a36';
+ let icon;if(isTarget)icon='<path d="M -7 -9 H 7 V -4 Q 7 4 0 5 Q -7 4 -7 -4 Z M -7 -7 H -11 V -3 Q -11 2 -5 2 M 7 -7 H 11 V -3 Q 11 2 5 2 M 0 5 V 10 M -5 10 H 5 V 13 H -5 Z"/>';
+ else{const points=Array.from({length:10},(_,i)=>{let angle=-Math.PI/2+i*Math.PI/5,r=i%2?4.8:10;return [Math.cos(angle)*r,Math.sin(angle)*r].join(',')}).join(' ');icon='<polygon points="'+points+'"/>'}
+ return '<g class="milestone-icon '+(isTarget?'trophy':'star')+'" data-value="'+value+'" data-state="'+(passed?'achieved':'upcoming')+'" transform="translate('+x+' '+y+')" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.7" stroke-linejoin="round"><title>'+esc(title)+'</title>'+icon+'</g>';
 }
 function drawChart(){
  const s=db.skills.find(x=>x.id===$('chartSkill').value),root=$('chart');if(!s){root.innerHTML='';$('chartnote').textContent='Add a skill to see its chart.';return}
- const t=skillTimeline(s),width=Math.max(620,t.blocks*145+210),height=370,left=72,right=width-160,top=30,bottom=286;
- const x=n=>left+(right-left)*(n-t.startDay)/t.span,y=v=>bottom-(bottom-top)*v/t.max;
+ const t=skillTimeline(s),width=Math.max(620,t.span*52+232),height=405,left=72,right=width-160,top=30,bottom=286;
+ const x=n=>left+(right-left)*(n-t.startDay)/Math.max(1,t.span-1),y=v=>bottom-(bottom-top)*v/t.max;
  let svg='<svg class="skill-timeline" style="min-width:'+width+'px" viewBox="0 0 '+width+' '+height+'" role="img" aria-label="'+esc(s.name+', '+t.span+' days from '+dateLabel(t.start)+', '+t.score+' points, next milestone '+t.next+' at '+t.daily+' per practice day')+'">';
- for(let i=0;i<t.blocks;i++){let bx=x(t.startDay+i*7),ex=x(t.startDay+(i+1)*7);svg+='<rect x="'+bx+'" y="'+top+'" width="'+(ex-bx)+'" height="'+(bottom-top)+'" fill="'+(i%2?'#f0f6f2':'#fafcfb')+'"/><text x="'+((bx+ex)/2)+'" y="17" text-anchor="middle">Week '+(i+1)+'</text>'}
- for(let i=0;i<=t.blocks;i++){let n=t.startDay+i*7;svg+='<line x1="'+x(n)+'" y1="'+top+'" x2="'+x(n)+'" y2="'+bottom+'" stroke="#dce7df"/><text x="'+x(n)+'" y="'+(bottom+23)+'" text-anchor="middle">'+esc(shortDate(dateFromNumber(n)))+'</text>'}
+ for(let i=0;i<t.blocks;i++){let bx=x(t.startDay+Math.max(0,i*7-.5)),ex=x(t.startDay+Math.min(t.span-1,(i+1)*7-.5));svg+='<rect x="'+bx+'" y="'+top+'" width="'+(ex-bx)+'" height="'+(bottom-top)+'" fill="'+(i%2?'#f0f6f2':'#fafcfb')+'"/><text x="'+((bx+ex)/2)+'" y="17" text-anchor="middle">Week '+(i+1)+'</text>'}
+ for(let i=0;i<t.span;i++){let n=t.startDay+i,date=dateFromNumber(n),future=date>t.today;svg+='<line x1="'+x(n)+'" y1="'+top+'" x2="'+x(n)+'" y2="'+bottom+'" stroke="'+(i%7===0?'#bacfc1':'#e1ebe4')+'"/><text class="daily-date" data-date="'+date+'" x="'+x(n)+'" y="'+(bottom+24)+'" text-anchor="middle" opacity="'+(future?'.65':'1')+'">'+esc(shortDate(date))+'</text>'}
  svg+='<line x1="'+left+'" y1="'+bottom+'" x2="'+right+'" y2="'+bottom+'" stroke="#bacfc1"/><text x="'+(left-12)+'" y="'+(bottom+4)+'" text-anchor="end">0</text>';
  for(const m of t.milestones){const my=y(m.value),label=(m.passed?'✓ ':'')+(m.isTarget?'Target ':'')+m.value.toLocaleString();svg+='<line x1="'+left+'" y1="'+my+'" x2="'+right+'" y2="'+my+'" stroke="'+(m.passed?'#8cb9a0':'#d69d36')+'" stroke-dasharray="'+(m.passed?'3 4':'6 4')+'"/><text class="milestone-label" x="'+(m.passed?left-8:right+8)+'" y="'+(my-3)+'" text-anchor="'+(m.passed?'end':'start')+'">'+esc(m.passed?'✓ '+m.value.toLocaleString():label)+'</text>';
  if(!m.passed)svg+='<text x="'+(right+8)+'" y="'+(my+13)+'">'+m.remaining+' practice day'+(m.remaining===1?'':'s')+' away</text>';
  }
- let path='M '+left+' '+bottom;
- for(const p of t.points){path+=' H '+x(dateNumber(p.date))+' V '+y(p.score)}path+=' H '+x(t.todayDay);
- svg+='<path d="'+path+'" fill="none" stroke="#16815e" stroke-width="3"/>';
- const forecastDays=Math.min(t.startDay+t.span-t.todayDay,Math.ceil((t.next-t.score)/t.daily));
- if(forecastDays>0)svg+='<path d="M '+x(t.todayDay)+' '+y(t.score)+' L '+x(t.todayDay+forecastDays)+' '+y(Math.min(t.next,t.score+forecastDays*t.daily))+'" fill="none" stroke="#d69d36" stroke-width="2" stroke-dasharray="5 4"/>';
- for(const p of t.points)svg+='<circle cx="'+x(dateNumber(p.date))+'" cy="'+y(p.score)+'" r="3.5" fill="#16815e"><title>'+esc(dateLabel(p.date)+': '+p.score.toLocaleString()+' points')+'</title></circle>';
- for(const m of t.milestones.filter(m=>m.passed&&m.date))svg+='<circle cx="'+x(dateNumber(m.date))+'" cy="'+y(m.value)+'" r="5" fill="#187b59" stroke="white" stroke-width="2"><title>'+esc(m.value.toLocaleString()+' milestone passed on '+dateLabel(m.date))+'</title></circle>';
- svg+='<line x1="'+x(t.todayDay)+'" y1="'+top+'" x2="'+x(t.todayDay)+'" y2="'+bottom+'" stroke="#6c8b79" stroke-dasharray="2 5"/><text x="'+x(t.todayDay)+'" y="'+(bottom+43)+'" text-anchor="middle">Today</text><text x="'+left+'" y="355">'+t.span+' days · '+esc(t.start.slice(0,4))+' · '+t.daily.toLocaleString()+'/day</text></svg>';
+ const actual=t.calendar.filter(p=>p.score!==null);
+ const path=actual.map((p,i)=>(i?'L ':'M ')+x(dateNumber(p.date))+' '+y(p.score)).join(' ');
+ svg+='<path class="recorded-line" d="'+path+'" fill="none" stroke="#16815e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>';
+ const forecastDays=Math.min(t.startDay+t.span-1-t.todayDay,Math.ceil((t.next-t.score)/t.daily));
+ if(forecastDays>0)svg+='<path class="forecast-line" d="M '+x(t.todayDay)+' '+y(t.score)+' L '+x(t.todayDay+forecastDays)+' '+y(Math.min(t.next,t.score+forecastDays*t.daily))+'" fill="none" stroke="#d69d36" stroke-width="2" stroke-dasharray="5 4"/>';
+ for(const p of actual)svg+='<circle class="daily-point" data-status="'+p.status+'" cx="'+x(dateNumber(p.date))+'" cy="'+y(p.score)+'" r="3.5" fill="'+(p.status==='Practised'?'#16815e':'white')+'" stroke="#16815e" stroke-width="1.5"><title>'+esc(dateLabel(p.date)+': '+p.status+' · '+p.score.toLocaleString()+' points')+'</title></circle>';
+ const markerValues=[];const forecastEnd=Math.min(t.next,t.score+forecastDays*t.daily);
+ for(let value=t.step;value<=Math.min(t.target,Math.max(t.score,forecastEnd));value+=t.step)markerValues.push(value);
+ if(t.target<=Math.max(t.score,forecastEnd)&&!markerValues.includes(t.target))markerValues.push(t.target);
+ for(const value of markerValues){const passed=value<=t.score;let crossing,title;
+ if(passed){const index=t.calendar.findIndex(p=>p.score!==null&&p.score>=value);if(index<0)continue;const previous=index>0?t.calendar[index-1].score:0,amount=t.calendar[index].score-previous;crossing=t.startDay+Math.max(0,index-1+(amount?(value-previous)/amount:1));title=value.toLocaleString()+' '+(value===t.target?'target':'milestone')+' achieved on '+dateLabel(t.calendar[index].date)}
+ else{if(forecastDays<=0||forecastEnd<=t.score)continue;crossing=t.todayDay+forecastDays*(value-t.score)/(forecastEnd-t.score);title=value.toLocaleString()+' '+(value===t.target?'target':'milestone')+' upcoming · estimated '+shortDate(dateFromNumber(Math.ceil(crossing)))}
+ svg+=milestoneIcon(value,value===t.target,passed,x(crossing),y(value),title);
+ }
+ svg+='<line x1="'+x(t.todayDay)+'" y1="'+top+'" x2="'+x(t.todayDay)+'" y2="'+bottom+'" stroke="#6c8b79" stroke-dasharray="2 5"/><text x="'+x(t.todayDay)+'" y="'+(bottom+50)+'" text-anchor="middle">Today</text><text x="'+left+'" y="385">'+t.span+' days · '+esc(t.start.slice(0,4))+' · '+t.daily.toLocaleString()+'/day</text></svg>';
  root.innerHTML=svg;
- $('chartnote').textContent=t.days.length+' completed practice days for '+s.name+'. Dates use calendar days, including days without practice. The timeline grows in seven-day blocks from the first recorded day (or the start of a new skill cycle). Green ticks mark milestones crossed in the current records; dashed amber lines show upcoming milestones. Intervals equal five times the current daily quantity ('+t.step.toLocaleString()+'). Estimates assume practice every day at '+t.daily.toLocaleString()+'/day; past recorded quantities stay unchanged. The overall target remains separately editable.';
+ $('chartnote').textContent=t.days.length+' completed practice days for '+s.name+'. Every calendar date is shown, including missed and upcoming days. Recorded daily totals are joined by straight diagonal segments; missed days remain flat. Hollow dots identify days without recorded practice. The dashed projection is an estimate, not a completed record. The timeline grows in seven-day blocks from the first recorded day (or the start of a new skill cycle). Filled gold stars mark achieved mini milestones; outlined stars mark upcoming intersections on the dashed estimate. A trophy marks the final target when its intersection enters the visible timeline, and fills gold when achieved. Intervals equal five times the current daily quantity ('+t.step.toLocaleString()+'). Estimates assume practice every day at '+t.daily.toLocaleString()+'/day; past recorded quantities stay unchanged. The overall target remains separately editable.';
 }
 $('chartSkill').onchange=drawChart;$('export').onclick=()=>{let blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='football-skills-backup-'+day()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};$('import').onclick=()=>$('file').click();$('file').onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let x=JSON.parse(await f.text());if(!Array.isArray(x.skills))throw Error('Invalid backup');if(!Array.isArray(x.completedDays))x.completedDays=[];if(!Array.isArray(x.sessions))x.sessions=[];if(!Array.isArray(x.matches))x.matches=[];if(!Array.isArray(x.archivedCycles))x.archivedCycles=[];if(confirm('Replace current tracker with this backup?')){db=x;save();render()}}catch(err){alert('Could not restore: '+err.message)}e.target.value=''};window.addEventListener('focus',()=>{if(day()!==currentDay){let wasToday=selectedDay===currentDay;currentDay=day();if(wasToday)selectedDay=currentDay;render()}});document.addEventListener('visibilitychange',()=>{if(!document.hidden&&day()!==currentDay){let wasToday=selectedDay===currentDay;currentDay=day();if(wasToday)selectedDay=currentDay;render()}});renderActivity();setupSettings();save();render();if('serviceWorker'in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(()=>{});
 </script></body></html>
